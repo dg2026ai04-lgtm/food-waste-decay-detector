@@ -1,1 +1,1 @@
-# medicine-safety-monitor
+# food-waste-decay-detector
