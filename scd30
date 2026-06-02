@@ -1,4 +1,5 @@
-# scd30.py - 정밀 CRC 오류 검증 기능이 포함된 SCD30 드라이버 라이브러리
+# scd30.py (라즈베리 파이 피코 내부에 이 이름 그대로 저장)
+from machine import I2C
 import utime
 import struct
 
@@ -18,7 +19,6 @@ class SCD30:
     GET_FIRMWARE_VER = 0xd100
     SOFT_RESET = 0xd304
 
-    # pause 값을 1500us로 디폴트 설정하여 신호 안정성을 확보합니다.
     def __init__(self, i2c, addr=0x61, pause=1500):
         self.i2c = i2c
         self.pause = pause
