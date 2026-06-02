@@ -1,14 +1,15 @@
-# main.py - 모드 설정형 단일 측정 + 그래프 버전
+# main.py - [에탄올 측정 기능 추가] 호기성 vs 혐기성 단일 측정 + 에탄올 그래프 버전
 from machine import Pin, SoftI2C, ADC
 import utime
 import network
 import socket
 from scd30 import SCD30
 
-# ★★★★★ 여기만 바꾸세요! ★★★★★
+# ★★★★★ [선택] 측정 모드 설정 ★★★★★
 # 호기성(유기호흡) 측정용 피코 → "aerobic"
 # 혐기성(무기호흡) 측정용 피코 → "anaerobic"
 MODE = "aerobic"   
+# ★Ref: 유기호흡은 에탄올 0ppm 수렴 / 무기호흡은 에탄올 수치 급상승!
 # ★★★★★★★★★★★★★★★★★★★★★★
 
 # ── 모바일 핫스팟 (2.4GHz) 정보 입력 ──────────────────
@@ -16,14 +17,14 @@ SSID = "WiFi_Name"
 PASSWORD = "WiFi_Password"
 
 # ── 하드웨어 핀 설정 ──────────────────────────────────
-led_green = Pin(16, Pin.OUT)  # D16
-led_red = Pin(18, Pin.OUT)    # D18
-mq2_sensor = ADC(26)          # A0
+led_green = Pin(16, Pin.OUT)  # D16 (초록 LED)
+led_red = Pin(18, Pin.OUT)    # D18 (빨간 LED)
+mq2_sensor = ADC(26)          # A0 (MQ-2 가스/에탄올 센서)
 
 i2c = SoftI2C(sda=Pin(8, Pin.PULL_UP), scl=Pin(9, Pin.PULL_UP), freq=20000)
 
 CO2_ACTIVE_LIMIT = 800.0     
-GAS_ROTTEN_LIMIT = 20000     
+ETHANOL_ROTTEN_LIMIT = 600.0  # 에탄올 농도가 600ppm을 넘으면 무기호흡/부패 경보로 판단
 
 scd_sensor = None
 try:
@@ -58,13 +59,23 @@ else:
     print("\n❌ 와이파이 연결 실패")
 
 # ── 측정값 및 그래프용 로그 저장 ──
-data = {"temp": 0.0, "humid": 0.0, "co2": 0.0, "gas": 0,
-        "temp_log": [], "co2_log": [], "gas_log": []}
+data = {"temp": 0.0, "humid": 0.0, "co2": 0.0, "ethanol": 100.0,
+        "temp_log": [], "co2_log": [], "ethanol_log": []}
 MAX_LOG = 15  # 그래프에 표시할 데이터 개수
 
-# ── 센서 측정 함수 ──
+# ── 센서 측정 및 에탄올 변환 알고리즘 ──
 def update_sensor_data():
-    gas_val = mq2_sensor.read_u16()
+    raw_gas = mq2_sensor.read_u16()
+    
+    # [과학적 변환] MQ-2의 아날로그 전압(0~65535)을 에탄올 검출 범위(100~2000 ppm)로 스케일링합니다.
+    # 청정 공기 기준 최솟값(약 5000) 이하일 때는 100ppm으로 고정하며, 최대치일 때 2000ppm이 됩니다.
+    if raw_gas < 5000:
+        ethanol_ppm = 100.0
+    else:
+        ethanol_ppm = 100.0 + ((raw_gas - 5000) / (65535 - 5000)) * 1900.0
+        if ethanol_ppm > 2000.0:
+            ethanol_ppm = 2000.0
+            
     co2, temp, humid = data["co2"], data["temp"], data["humid"]
     
     if scd_sensor is not None:
@@ -77,29 +88,30 @@ def update_sensor_data():
     data["temp"] = temp
     data["humid"] = humid
     data["co2"] = co2
-    data["gas"] = gas_val
+    data["ethanol"] = ethanol_ppm
     
     # 그래프 로그 갱신
     data["temp_log"].append(round(temp, 1))
     data["co2_log"].append(round(co2, 1))
-    data["gas_log"].append(gas_val)
+    data["ethanol_log"].append(round(ethanol_ppm, 1))
+    
     if len(data["temp_log"]) > MAX_LOG:
         data["temp_log"].pop(0)
         data["co2_log"].pop(0)
-        data["gas_log"].pop(0)
+        data["ethanol_log"].pop(0)
     
-    # LED 제어
-    if gas_val > GAS_ROTTEN_LIMIT:
+    # LED 제어 (에탄올 농도 기준)
+    if ethanol_ppm > ETHANOL_ROTTEN_LIMIT:
         led_green.value(0)
-        led_red.value(1)
+        led_red.value(1)  # 무기호흡(부패) 활성화 시 빨간 LED
     elif co2 > CO2_ACTIVE_LIMIT:
-        led_green.value(1)
+        led_green.value(1)  # 유기호흡(퇴비화) 활성화 시 초록 LED
         led_red.value(0)
     else:
         led_green.value(0)
         led_red.value(0)
     
-    print(f"[{MODE}] 온도:{temp:.1f} 습도:{humid:.1f} CO2:{co2:.1f} 가스:{gas_val}")
+    print(f"[{MODE}] 온도:{temp:.1f} 습도:{humid:.1f} CO2:{co2:.1f} 에탄올:{ethanol_ppm:.1f}ppm")
 
 # ── SVG 그래프 생성 함수 ──
 def make_svg_graph(data_log, color, max_val, label):
@@ -128,23 +140,23 @@ def make_page():
     
     # 모드별 디자인 설정
     if MODE == "aerobic":
-        title = "🌬️ 호기성 호흡 (유기호흡)"
-        sub = "산소(O₂) 있는 환경 · 친환경 퇴비화 측정"
+        title = "🌬️ 호기성 호흡 (유기호흡) 측정기"
+        sub = "산소(O₂) 유입 상태 · 친환경 퇴비화 분석"
         accent = "#10B981"
-        if data["gas"] > GAS_ROTTEN_LIMIT:
-            status_text, status_color = "⚠️ 이상! 악취 발생", "#EF4444"
+        if data["ethanol"] > ETHANOL_ROTTEN_LIMIT:
+            status_text, status_color = "⚠️ 이상 경보! 에탄올 감지 (산소 부족 우려)", "#EF4444"
         elif data["co2"] > CO2_ACTIVE_LIMIT:
-            status_text, status_color = "♻️ 정상! 퇴비화 활발", "#10B981"
+            status_text, status_color = "♻️ 정상 작동! 호기성 유기 분해 활발", "#10B981"
         else:
             status_text, status_color = "💨 분해 대기 상태", "#64748B"
     else:
-        title = "🦠 혐기성 호흡 (무기호흡)"
-        sub = "산소(O₂) 없는 환경 · 부패/악취 측정"
+        title = "🦠 혐기성 호흡 (무기호흡) 측정기"
+        sub = "산소(O₂) 차단 상태 · 알코올 발효 및 부패 분석"
         accent = "#EF4444"
-        if data["gas"] > GAS_ROTTEN_LIMIT:
-            status_text, status_color = "🚨 부패 진행! 악취 발생", "#EF4444"
+        if data["ethanol"] > ETHANOL_ROTTEN_LIMIT:
+            status_text, status_color = "🚨 무기호흡 확인! 에탄올 분출 중", "#EF4444"
         elif data["co2"] > CO2_ACTIVE_LIMIT:
-            status_text, status_color = "🔄 혐기성 분해 진행 중", "#F59E0B"
+            status_text, status_color = "🔄 혐기성 이산화탄소 방출 중", "#F59E0B"
         else:
             status_text, status_color = "💨 분해 대기 상태", "#64748B"
 
@@ -183,17 +195,19 @@ def make_page():
         <div class="card"><div class="icon">🌡️</div><div class="label">내부 온도</div><div class="value">{data['temp']:.1f} °C</div></div>
         <div class="card"><div class="icon">💧</div><div class="label">내부 습도</div><div class="value">{data['humid']:.1f} %</div></div>
         <div class="card"><div class="icon">🌫️</div><div class="label">CO₂ 농도</div><div class="value">{data['co2']:.1f} ppm</div></div>
-        <div class="card"><div class="icon">💨</div><div class="label">악취 가스</div><div class="value">{data['gas']}</div></div>
+        <!-- ★ 에탄올 측정 카드 추가 ★ -->
+        <div class="card" style="border: 1px solid #F59E0B;"><div class="icon">🍷</div><div class="label" style="color: #F59E0B; font-weight: bold;">에탄올 추정 농도</div><div class="value" style="color: #F59E0B;">{data['ethanol']:.1f} ppm</div></div>
     </div>
     
     <div class="graph-box">
-        {make_svg_graph(data['co2_log'], '#00d4ff', 2000, '📈 CO₂ 농도 변화 추이')}
+        {make_svg_graph(data['co2_log'], '#00d4ff', 2000, '🌫️ CO₂ 농도 변화 추이 (ppm)')}
+    </div>
+    <!-- ★ 에탄올 전용 실시간 그래프 추가 ★ -->
+    <div class="graph-box">
+        {make_svg_graph(data['ethanol_log'], '#F59E0B', 2000, '🍷 에탄올(알코올) 농도 변화 추이 (ppm)')}
     </div>
     <div class="graph-box">
-        {make_svg_graph(data['gas_log'], '#F59E0B', 40000, '📈 악취 가스 변화 추이')}
-    </div>
-    <div class="graph-box">
-        {make_svg_graph(data['temp_log'], '#10B981', 50, '📈 온도 변화 추이')}
+        {make_svg_graph(data['temp_log'], '#10B981', 50, '🌡️ 온도 변화 추이 (°C)')}
     </div>
     
     <div class="footer">
