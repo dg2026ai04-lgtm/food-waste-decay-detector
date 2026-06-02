@@ -6,8 +6,8 @@ import socket
 from scd30 import SCD30  # 우리가 저장한 scd30.py 호출 [1]
 
 # ── [중요] 모바일 핫스팟 (2.4GHz) 정보 입력 ──────────────────
-SSID = "WiFi_Name"      
-PASSWORD = "WiFi_Password"
+SSID = "senWiFi_Free_sky"      
+PASSWORD = "sudo25sky@"
 
 # ── 하드웨어 및 캐리어 보드 핀 설정 ──────────────────────────────────
 # 1. LED 설정: D16(초록 LED), D18(빨간 LED)에 대응
