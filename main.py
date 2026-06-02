@@ -1,48 +1,54 @@
-# main.py - SCD30 핀을 GP8/GP9로 수정한 최종 완성 코드
+# main.py - Pico 2 WH & Grove Shield 최적화 IoT 웹서버 코드
 from machine import Pin, SoftI2C, ADC
 import utime
 import network
 import socket
-from scd30 import SCD30  # 저장해둔 scd30.py 라이브러리 호출
+from scd30 import SCD30  # 우리가 저장한 scd30.py 호출 [1]
 
-# ── [중요] 와이파이 정보 입력 (스마트폰 핫스팟 2.4GHz 권장) ──
+# ── [중요] 모바일 핫스팟 (2.4GHz) 정보 입력 ──────────────────
 SSID = "WiFi_Name"      
 PASSWORD = "WiFi_Password"
 
-# ── 하드웨어 및 통신 핀 설정 ──────────────────────────────────
-led_green = Pin(14, Pin.OUT)  # 초록 LED (GP14)
-led_red = Pin(15, Pin.OUT)    # 빨간 LED (GP15)
-mq2_sensor = ADC(26)          # MQ-2 가스 센서 (GP26)
+# ── 하드웨어 및 캐리어 보드 핀 설정 ──────────────────────────────────
+# 1. LED 설정: D16(초록 LED), D18(빨간 LED)에 대응
+led_green = Pin(16, Pin.OUT)  # D16 핀 (내부 GP16)
+led_red = Pin(18, Pin.OUT)    # D18 핀 (내부 GP18)
 
-# ★★★ [핵심 수정] 진단 결과 발견된 GP8(SDA), GP9(SCL)로 변경! ★★★
+# 2. MQ-2 가스 센서: A0에 대응
+mq2_sensor = ADC(26)          # A0 핀 (내부 GP26 / ADC0)
+
+# 3. SCD30 센서: I2C0에 대응
+# 클록 스트레칭을 정밀 제어하기 위해 소프트웨어 I2C 사용 (GP8/SDA, GP9/SCL)
 i2c = SoftI2C(
     sda=Pin(8, Pin.PULL_UP), 
     scl=Pin(9, Pin.PULL_UP), 
     freq=20000
 )
 
+# 판별 알고리즘 임계값 설정
 CO2_COMPOST_LIMIT = 800.0  
 GAS_ROTTEN_LIMIT = 22000    
 
 scd_sensor = None
 try:
-    print(">> I2C 버스 스캔 가동 중 (GP8/GP9)...")
+    print(">> I2C 버스 스캔 가동 중 (I2C0 포트 / GP8, GP9)...")
     devices = i2c.scan()
     print(">> 감지된 16진수 I2C 주소들:", [hex(d) for d in devices])
     
     if 0x61 in devices:
+        # 제공해주신 정밀 클래스로 연결 가동
         scd_sensor = SCD30(i2c, addr=0x61, pause=1500)
         utime.sleep_ms(100)
-        scd_sensor.start_cont_measure()  # 센서 측정 시작 명령
+        scd_sensor.start_cont_measure()  # SCD30 측정 시작 명령 송출
         print(">> ✅ 정밀 SCD30 센서 가동 및 수립 완료!")
     else:
-        print(">> ⚠️ GP8/GP9에서 센서를 찾지 못했습니다. 선 연결을 확인하세요.")
+        print(">> ⚠️ 여전히 SCD30 센서가 감지되지 않습니다. I2C0 자리에 확실히 꽂았는지 확인해 주세요.")
 except SCD30.NotFoundException:
-    print(">> ⚠️ 예외: SCD30 장치를 발견하지 못했습니다.")
+    print(">> ⚠️ 예외 발생: SCD30 장치를 발견하지 못했습니다.")
 except Exception as e:
-    print(">> ❌ 초기화 중 에러:", e)
+    print(">> ❌ 초기화 중 에러 발생:", e)
 
-# ── 와이파이 연결 ──────────────────────────
+# ── 와이파이 연결 프로세스 (모바일 핫스팟 연결 확인) ──────────────────
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
 wlan.connect(SSID, PASSWORD)
@@ -62,7 +68,7 @@ if wlan.isconnected():
     print(f"IP 주소: {my_ip}")
 else:
     my_ip = "127.0.0.1"
-    print("\n❌ 와이파이 연결 실패. (핫스팟 2.4GHz 설정을 확인하세요)")
+    print("\n❌ 와이파이 연결 실패. 핫스팟 이름과 비번, 그리고 2.4GHz 설정인지 확인해 주세요.")
 
 # ── HTML 페이지 동적 생성 함수 ──────────────────────
 def make_page(temp, humid, co2, gas_val, status, rssi, uptime):
@@ -131,7 +137,7 @@ def make_page(temp, humid, co2, gas_val, status, rssi, uptime):
 <body>
     <div class="header">
         <h1>🌱 에코 밀폐 용기 모니터 🌱</h1>
-        <p>친환경 퇴비화 vs 부패 판별기</p>
+        <p>친환경 퇴비화 vs 부패 판별기 (Pico 2 WH)</p>
     </div>
 
     <div class="status-banner">
@@ -175,7 +181,7 @@ def make_page(temp, humid, co2, gas_val, status, rssi, uptime):
     </div>
 
     <div class="footer">
-        Powered by MicroPython on Pico | 당곡고 환경과학 프로젝트
+        Powered by MicroPython on Pico 2 WH | 당곡고 환경과학 프로젝트
     </div>
 </body>
 </html>"""
@@ -204,13 +210,15 @@ while True:
 
         print(f"💻 기기 접속: {addr[0]}")
         
-        # 1. MQ-2 가스 데이터 수집
+        # 1. MQ-2 아날로그 가스 수집
         gas_val = mq2_sensor.read_u16()
         
-        # 2. SCD30 데이터 수집
+        # 2. SCD30 데이터 수집 (안전 예외 처리 적용)
         co2, temp, humid = 0.0, 0.0, 0.0
+        
         if scd_sensor is not None:
             try:
+                # 제공해주신 라이브러리의 감지 상태 판별 및 읽기 메서드 실행
                 if scd_sensor.get_status_ready():
                     co2, temp, humid = scd_sensor.read_measurement()
             except Exception as read_err:
@@ -234,6 +242,7 @@ while True:
         rssi = wlan.status('rssi') if wlan.isconnected() else 0
         uptime = utime.ticks_ms() // 1000
 
+        # 동적 HTML 전송
         page = make_page(temp, humid, co2, gas_val, status_str, rssi, uptime)
         client.send(b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n")
         client.send(page.encode('utf-8'))
