@@ -7,17 +7,18 @@ from neopixel import NeoPixel
 
 # ── 모바일 핫스팟 (2.4GHz) 정보 입력 ──────────────────
 # ★ 아래 두 줄을 본인 핫스팟 정보로 수정하세요! (따옴표는 남겨두기)
-SSID = "senWiFi_Free_sky"      
-PASSWORD = "sudo25sky@"
+SSID = "WiFi_Name"      
+PASSWORD = "WiFi_Password"
 
 # ── WS2813 네오픽셀 LED 설정 (D16 = GP16) ──────────────
-NEOPIXEL_PIN = 16       # WS2813 DIN을 D16에 연결
-NUM_LEDS = 10           # LED 개수
-np = NeoPixel(Pin(NEOPIXEL_PIN), NUM_LEDS)
-LED_BRIGHTNESS = 0.3    # 밝기 (0.0~1.0, 전류 절약을 위해 0.3 권장)
+NEOPIXEL_PIN = 16
+NUM_LEDS = 10
+WS2813_TIMING = (280, 515, 515, 745)   # ★ WS2813 전용 타이밍!
+np = NeoPixel(Pin(NEOPIXEL_PIN), NUM_LEDS, timing=WS2813_TIMING)
+LED_BRIGHTNESS = 0.3    # 밝기 (0.0~1.0)
 
 # ── 기타 하드웨어 핀 설정 ──────────────────────────────
-mq2_sensor = ADC(26)    # A0 (에탄올 센서)
+mq2_sensor = ADC(26)
 
 i2c = SoftI2C(sda=Pin(8, Pin.PULL_UP), scl=Pin(9, Pin.PULL_UP), freq=20000)
 
@@ -26,7 +27,6 @@ ETHANOL_WARN_LIMIT = 500.0
 
 # ── WS2813 네오픽셀 제어 함수들 ──────────────────────
 def set_all_leds(r, g, b):
-    """모든 LED를 같은 색으로 (밝기 적용)"""
     r = int(r * LED_BRIGHTNESS)
     g = int(g * LED_BRIGHTNESS)
     b = int(b * LED_BRIGHTNESS)
@@ -35,7 +35,6 @@ def set_all_leds(r, g, b):
     np.write()
 
 def wheel(pos):
-    """무지개 색상 계산 (0~255 입력 → RGB 반환)"""
     if pos < 85:
         return (255 - pos * 3, pos * 3, 0)
     elif pos < 170:
@@ -48,7 +47,6 @@ def wheel(pos):
 rainbow_pos = 0
 
 def rainbow_cycle():
-    """무지개가 흐르는 효과"""
     global rainbow_pos
     for i in range(NUM_LEDS):
         color = wheel((i * 256 // NUM_LEDS + rainbow_pos) & 255)
@@ -60,7 +58,6 @@ def rainbow_cycle():
     rainbow_pos = (rainbow_pos + 8) & 255
 
 def update_leds(respiration, is_connected, blink):
-    """상태에 따라 LED 효과 결정"""
     if not is_connected:
         rainbow_cycle()                # 🌈 연결 중: 무지개
     elif respiration == "ANAEROBIC":
@@ -73,7 +70,7 @@ def update_leds(respiration, is_connected, blink):
     else:
         set_all_leds(0, 80, 255)       # 🔵 대기: 파랑
 
-# ── 부팅 시 LED 테스트 (무지개 한 바퀴) ──
+# ── 부팅 시 LED 무지개 테스트 ──
 print(">> 🌈 LED 테스트 중...")
 for _ in range(30):
     rainbow_cycle()
@@ -90,7 +87,7 @@ try:
 except Exception as e:
     print(">> ❌ 센서 에러:", e)
 
-# ── 와이파이 연결 (연결 중 무지개 효과!) ──────────────
+# ── 와이파이 연결 (연결 중 무지개!) ──────────────
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
 wlan.connect(SSID, PASSWORD)
@@ -101,13 +98,13 @@ while max_wait > 0:
         break
     max_wait -= 1
     print(".", end="")
-    rainbow_cycle()        # 연결되는 동안 무지개 흐름!
+    rainbow_cycle()
     utime.sleep(1)
 
 if wlan.isconnected():
     my_ip = wlan.ifconfig()[0]
     print(f"\n✅ 연결 성공! 접속 주소: http://{my_ip}")
-    set_all_leds(0, 80, 255)   # 연결 성공하면 파란색 대기
+    set_all_leds(0, 80, 255)   # 연결 성공: 파란색
 else:
     my_ip = "127.0.0.1"
     print("\n❌ 와이파이 연결 실패")
@@ -154,7 +151,6 @@ def update_sensor_data():
     has_ethanol = ethanol_ppm > ETHANOL_WARN_LIMIT
     blink_state = not blink_state
     
-    # ★ 호흡 종류 판별 ★
     if is_decomposing and has_ethanol:
         data["respiration"] = "ANAEROBIC"
     elif is_decomposing and not has_ethanol:
@@ -162,7 +158,7 @@ def update_sensor_data():
     else:
         data["respiration"] = "WAITING"
     
-    # ★ WS2813 네오픽셀 LED 업데이트 ★
+    # ★ WS2813 LED 업데이트 ★
     update_leds(data["respiration"], wlan.isconnected(), blink_state)
     
     if is_measuring:
@@ -184,7 +180,7 @@ def update_sensor_data():
     
     print(f"CO2:{co2:.0f} 에탄올:{ethanol_ppm:.0f}ppm → {data['respiration']}")
 
-# ── 시간축 SVG 그래프 (작은 변화도 잘 보이는 안정 버전) ──
+# ── 시간축 SVG 그래프 (작은 변화도 잘 보이는 버전) ──
 def make_time_graph(value_log, time_log, color, max_val, label, unit):
     if len(value_log) < 2:
         return f'<div style="color:#999; font-size:0.85em; padding:20px; text-align:center;">⏳ 잠시만 기다려 주세요 (두 번째 데이터 수집 후 그래프가 나타납니다)</div>'
@@ -198,19 +194,17 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
     data_min = min(value_log)
     data_max = max(value_log)
     
-    # ★ 핵심 수정: 변화량이 작아도 잘 보이도록 최소 범위 보장! ★
     value_range = data_max - data_min
-    if value_range < 20:           # 변화가 20 미만으로 작으면
+    if value_range < 20:
         center = (data_max + data_min) / 2
-        data_min = center - 15     # 중심 기준 위아래로 충분한 여백
+        data_min = center - 15
         data_max = center + 15
         value_range = data_max - data_min
     
-    # 위아래 20% 여백
     y_min = data_min - value_range * 0.2
     y_max = data_max + value_range * 0.2
     y_range = y_max - y_min
-    if y_range == 0:               # 0으로 나누기 방지
+    if y_range == 0:
         y_range = 1
     
     graph_h = height - margin_top - margin_bottom
@@ -222,7 +216,7 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
     for i, val in enumerate(value_log):
         x = margin_x + (time_log[i] / max_time) * graph_w
         y = margin_top + graph_h - ((val - y_min) / y_range) * graph_h
-        y = max(margin_top, min(y, margin_top + graph_h))  # 안전장치
+        y = max(margin_top, min(y, margin_top + graph_h))
         points.append(f"{x:.1f},{y:.1f}")
         circles += f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.5" fill="{color}"/>'
     
@@ -267,7 +261,7 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
         <span>⏱️ 0분 (시작: {start_val:.0f}{unit})</span>
         <span>{max_time:.1f}분 (현재: {end_val:.0f}{unit})</span>
     </div>'''
-# ── 측정 시간 입력 페이지 ──
+    # ── 측정 시간 입력 페이지 ──
 def make_setup_page():
     return """<!DOCTYPE html>
 <html>
