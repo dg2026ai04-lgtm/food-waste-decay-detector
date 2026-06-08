@@ -7,8 +7,8 @@ from neopixel import NeoPixel
 
 # ── 모바일 핫스팟 (2.4GHz) 정보 입력 ──────────────────
 # ★ 아래 두 줄을 본인 핫스팟 정보로 수정하세요! (따옴표는 남겨두기)
-SSID = "WiFi_Name"      
-PASSWORD = "WiFi_Password"
+SSID = "senWiFi_Free_sky"      
+PASSWORD = "sudo25sky@"
 
 # ── WS2813 네오픽셀 LED 설정 (D16 = GP16) ──────────────
 NEOPIXEL_PIN = 16       # WS2813 DIN을 D16에 연결
@@ -184,7 +184,7 @@ def update_sensor_data():
     
     print(f"CO2:{co2:.0f} 에탄올:{ethanol_ppm:.0f}ppm → {data['respiration']}")
 
-# ── 시간축 SVG 그래프 (자동 확대 + 눈금 + 점 표시 + 안전장치) ──
+# ── 시간축 SVG 그래프 (작은 변화도 잘 보이는 안정 버전) ──
 def make_time_graph(value_log, time_log, color, max_val, label, unit):
     if len(value_log) < 2:
         return f'<div style="color:#999; font-size:0.85em; padding:20px; text-align:center;">⏳ 잠시만 기다려 주세요 (두 번째 데이터 수집 후 그래프가 나타납니다)</div>'
@@ -192,20 +192,26 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
     width = 320
     height = 120
     margin_x = 10
-    margin_top = 10
-    margin_bottom = 10
+    margin_top = 15
+    margin_bottom = 15
     
     data_min = min(value_log)
     data_max = max(value_log)
     
-    if data_max == data_min:
-        data_max += 1
-        data_min -= 1
-    
+    # ★ 핵심 수정: 변화량이 작아도 잘 보이도록 최소 범위 보장! ★
     value_range = data_max - data_min
-    y_min = data_min - value_range * 0.15
-    y_max = data_max + value_range * 0.15
+    if value_range < 20:           # 변화가 20 미만으로 작으면
+        center = (data_max + data_min) / 2
+        data_min = center - 15     # 중심 기준 위아래로 충분한 여백
+        data_max = center + 15
+        value_range = data_max - data_min
+    
+    # 위아래 20% 여백
+    y_min = data_min - value_range * 0.2
+    y_max = data_max + value_range * 0.2
     y_range = y_max - y_min
+    if y_range == 0:               # 0으로 나누기 방지
+        y_range = 1
     
     graph_h = height - margin_top - margin_bottom
     graph_w = width - 2 * margin_x
@@ -218,7 +224,7 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
         y = margin_top + graph_h - ((val - y_min) / y_range) * graph_h
         y = max(margin_top, min(y, margin_top + graph_h))  # 안전장치
         points.append(f"{x:.1f},{y:.1f}")
-        circles += f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="{color}"/>'
+        circles += f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.5" fill="{color}"/>'
     
     polyline = " ".join(points)
     
@@ -253,7 +259,7 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
     <svg width="100%" height="{height}" viewBox="0 0 {width} {height}" style="background:#fafafa; border-radius:8px; border:1px solid #e0e0e0;">
         {grid_lines}
         <polygon points="{fill_points}" fill="{color}" opacity="0.12"/>
-        <polyline points="{polyline}" fill="none" stroke="{color}" stroke-width="2.5"/>
+        <polyline points="{polyline}" fill="none" stroke="{color}" stroke-width="3"/>
         {circles}
         {y_labels}
     </svg>
@@ -261,7 +267,7 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
         <span>⏱️ 0분 (시작: {start_val:.0f}{unit})</span>
         <span>{max_time:.1f}분 (현재: {end_val:.0f}{unit})</span>
     </div>'''
-    # ── 측정 시간 입력 페이지 ──
+# ── 측정 시간 입력 페이지 ──
 def make_setup_page():
     return """<!DOCTYPE html>
 <html>
