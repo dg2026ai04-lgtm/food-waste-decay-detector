@@ -6,8 +6,8 @@ from scd30 import SCD30
 
 # ── 모바일 핫스팟 (2.4GHz) 정보 입력 ──────────────────
 # ★ 아래 두 줄을 본인 핫스팟 정보로 수정하세요! (따옴표는 남겨두기)
-SSID = "WiFi_Name"      
-PASSWORD = "WiFi_Password"
+SSID = "senWiFi_Free_sky"      
+PASSWORD = "sudo25sky@"
 
 # ── 하드웨어 핀 설정 ──────────────────────────────────
 led_green = Pin(16, Pin.OUT)
@@ -158,6 +158,8 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
     for i, val in enumerate(value_log):
         x = margin_x + (time_log[i] / max_time) * graph_w
         y = margin_top + graph_h - ((val - y_min) / y_range) * graph_h
+        # ★ 안전장치: y좌표가 그래프 박스를 벗어나지 않도록 제한! ★
+        y = max(margin_top, min(y, margin_top + graph_h))
         points.append(f"{x:.1f},{y:.1f}")
         circles += f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="{color}"/>'
     
@@ -202,7 +204,7 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
         <span>⏱️ 0분 (시작: {start_val:.0f}{unit})</span>
         <span>{max_time:.1f}분 (현재: {end_val:.0f}{unit})</span>
     </div>'''
-    # ── 측정 시간 입력 페이지 ──
+# ── 측정 시간 입력 페이지 ──
 def make_setup_page():
     return """<!DOCTYPE html>
 <html>
