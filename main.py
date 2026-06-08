@@ -126,37 +126,83 @@ def update_sensor_data():
     
     print(f"CO2:{co2:.0f} 에탄올:{ethanol_ppm:.0f}ppm → {data['respiration']}")
 
-# ── 시간축 SVG 그래프 ──
+# ── 시간축 SVG 그래프 (자동 확대 + 눈금 + 점 표시) ──
 def make_time_graph(value_log, time_log, color, max_val, label, unit):
     if len(value_log) < 2:
         return f'<div style="color:#999; font-size:0.85em; padding:20px; text-align:center;">⏳ 잠시만 기다려 주세요 (두 번째 데이터 수집 후 그래프가 나타납니다)</div>'
     
     width = 320
-    height = 100
-    margin = 5
-    points = []
-    n = len(value_log)
+    height = 120
+    margin_x = 10
+    margin_top = 10
+    margin_bottom = 10
+    
+    data_min = min(value_log)
+    data_max = max(value_log)
+    
+    if data_max == data_min:
+        data_max += 1
+        data_min -= 1
+    
+    value_range = data_max - data_min
+    y_min = data_min - value_range * 0.15
+    y_max = data_max + value_range * 0.15
+    y_range = y_max - y_min
+    
+    graph_h = height - margin_top - margin_bottom
+    graph_w = width - 2 * margin_x
     max_time = time_log[-1] if time_log[-1] > 0 else 1
     
+    points = []
+    circles = ""
     for i, val in enumerate(value_log):
-        x = margin + (time_log[i] / max_time) * (width - 2*margin)
-        y = height - margin - (min(val, max_val) / max_val) * (height - 2*margin)
-        points.append(f"{x:.0f},{y:.0f}")
+        x = margin_x + (time_log[i] / max_time) * graph_w
+        y = margin_top + graph_h - ((val - y_min) / y_range) * graph_h
+        points.append(f"{x:.1f},{y:.1f}")
+        circles += f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="{color}"/>'
     
     polyline = " ".join(points)
+    
+    first_x = margin_x
+    last_x = margin_x + graph_w
+    bottom_y = margin_top + graph_h
+    fill_points = f"{first_x:.1f},{bottom_y:.1f} " + polyline + f" {last_x:.1f},{bottom_y:.1f}"
+    
+    grid_lines = ""
+    y_labels = ""
+    for ratio in [0, 0.5, 1.0]:
+        gy = margin_top + graph_h * ratio
+        grid_lines += f'<line x1="{margin_x}" y1="{gy:.1f}" x2="{last_x:.1f}" y2="{gy:.1f}" stroke="#e8e8e8" stroke-width="1"/>'
+        label_val = y_max - (y_max - y_min) * ratio
+        y_labels += f'<text x="{margin_x + 2}" y="{gy - 2:.1f}" font-size="8" fill="#aaa">{label_val:.0f}</text>'
+    
     start_val = value_log[0]
     end_val = value_log[-1]
+    change = end_val - start_val
     
-    return f'''<div style="margin-bottom:5px; color:{color}; font-size:0.9em; font-weight:bold;">{label}</div>
-    <svg width="100%" height="{height}" viewBox="0 0 {width} {height}" style="background:#f8f9fa; border-radius:8px; border:1px solid #e0e0e0;">
+    if change > 0:
+        change_text = f'<span style="color:#e53935; font-weight:bold;">▲ {abs(change):.0f}{unit} 상승</span>'
+    elif change < 0:
+        change_text = f'<span style="color:#1e88e5; font-weight:bold;">▼ {abs(change):.0f}{unit} 하강</span>'
+    else:
+        change_text = f'<span style="color:#888;">― 변화 없음</span>'
+    
+    return f'''<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+        <span style="color:{color}; font-size:0.9em; font-weight:bold;">{label}</span>
+        <span style="font-size:0.8em;">{change_text}</span>
+    </div>
+    <svg width="100%" height="{height}" viewBox="0 0 {width} {height}" style="background:#fafafa; border-radius:8px; border:1px solid #e0e0e0;">
+        {grid_lines}
+        <polygon points="{fill_points}" fill="{color}" opacity="0.12"/>
         <polyline points="{polyline}" fill="none" stroke="{color}" stroke-width="2.5"/>
+        {circles}
+        {y_labels}
     </svg>
     <div style="display:flex; justify-content:space-between; color:#888; font-size:0.7em; margin-top:3px;">
-        <span>0분 (시작: {start_val:.0f}{unit})</span>
+        <span>⏱️ 0분 (시작: {start_val:.0f}{unit})</span>
         <span>{max_time:.1f}분 (현재: {end_val:.0f}{unit})</span>
     </div>'''
-
-# ── 측정 시간 입력 페이지 ──
+    # ── 측정 시간 입력 페이지 ──
 def make_setup_page():
     return """<!DOCTYPE html>
 <html>
@@ -340,7 +386,6 @@ while True:
                 
                 print(f">> ▶ {total_minutes}분 측정 시작! (저장 간격: {save_interval}초)")
                 
-                # 브라우저를 '/measure'로 보내서 무한 리셋 방지!
                 header = "HTTP/1.1 303 See Other\r\n"
                 header += "Location: /measure\r\n"
                 header += "Connection: close\r\n\r\n"
