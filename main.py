@@ -5,6 +5,7 @@ import socket
 from scd30 import SCD30
 
 # ── 모바일 핫스팟 (2.4GHz) 정보 입력 ──────────────────
+# ★ 아래 두 줄을 본인 핫스팟 정보로 수정하세요! (따옴표는 남겨두기)
 SSID = "WiFi_Name"      
 PASSWORD = "WiFi_Password"
 
@@ -54,17 +55,18 @@ data = {"temp": 0.0, "humid": 0.0, "co2": 0.0, "ethanol": 100.0,
         "co2_log": [], "ethanol_log": [], "time_log": [], "respiration": "WAITING"}
 
 # ── 측정 시간 관리 변수 ──
-MAX_POINTS = 30          # 그래프에 표시할 최대 데이터 개수
-total_minutes = 0        # 사용자가 설정한 총 측정 시간(분)
-is_measuring = False     # 측정 중인지 여부
-start_time = 0           # 측정 시작 시각(ms)
-save_interval = 10       # 데이터 저장 간격(초) - 자동 계산됨
-last_save_time = 0       # 마지막 저장 시각
+MAX_POINTS = 30
+total_minutes = 0
+is_measuring = False
+just_started = False
+start_time = 0
+save_interval = 10
+last_save_time = 0
 blink_state = False
 
 # ── 센서 측정 + 호흡 판별 ──
 def update_sensor_data():
-    global blink_state, is_measuring, last_save_time
+    global blink_state, is_measuring, last_save_time, just_started
     raw_gas = mq2_sensor.read_u16()
     if raw_gas < 5000:
         ethanol_ppm = 100.0
@@ -86,7 +88,6 @@ def update_sensor_data():
     data["co2"] = co2
     data["ethanol"] = ethanol_ppm
     
-    # 호흡 판별
     is_decomposing = co2 > CO2_ACTIVE_LIMIT
     has_ethanol = ethanol_ppm > ETHANOL_WARN_LIMIT
     blink_state = not blink_state
@@ -104,21 +105,19 @@ def update_sensor_data():
         led_green.value(1 if blink_state else 0)
         led_red.value(0)
     
-    # ★ 측정 중일 때만 시간축 데이터 저장 ★
     if is_measuring:
         now = utime.ticks_ms()
-        elapsed_sec = utime.ticks_diff(now, start_time) // 1000  # 경과 시간(초)
+        elapsed_sec = utime.ticks_diff(now, start_time) // 1000
         
-        # 설정한 저장 간격마다 데이터 기록
-        if utime.ticks_diff(now, last_save_time) >= save_interval * 1000:
+        if just_started or (utime.ticks_diff(now, last_save_time) >= save_interval * 1000):
+            just_started = False
             last_save_time = now
-            elapsed_min = elapsed_sec / 60  # 경과 시간(분)
+            elapsed_min = elapsed_sec / 60
             data["co2_log"].append(round(co2, 1))
             data["ethanol_log"].append(round(ethanol_ppm, 1))
             data["time_log"].append(round(elapsed_min, 1))
             print(f"[기록] {elapsed_min:.1f}분 | CO2:{co2:.0f} 에탄올:{ethanol_ppm:.0f}")
         
-        # 설정 시간이 다 되면 측정 자동 종료
         if elapsed_sec >= total_minutes * 60:
             is_measuring = False
             led_green.value(0)
@@ -127,10 +126,10 @@ def update_sensor_data():
     
     print(f"CO2:{co2:.0f} 에탄올:{ethanol_ppm:.0f}ppm → {data['respiration']}")
 
-# ── 시간축 SVG 그래프 (X축에 시간 표시!) ──
+# ── 시간축 SVG 그래프 ──
 def make_time_graph(value_log, time_log, color, max_val, label, unit):
     if len(value_log) < 2:
-        return f'<div style="color:#999; font-size:0.85em; padding:20px; text-align:center;">⏳ 측정을 시작하면 그래프가 그려집니다</div>'
+        return f'<div style="color:#999; font-size:0.85em; padding:20px; text-align:center;">⏳ 잠시만 기다려 주세요 (두 번째 데이터 수집 후 그래프가 나타납니다)</div>'
     
     width = 320
     height = 100
@@ -140,13 +139,11 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
     max_time = time_log[-1] if time_log[-1] > 0 else 1
     
     for i, val in enumerate(value_log):
-        # X축: 시간 비율, Y축: 값 비율
         x = margin + (time_log[i] / max_time) * (width - 2*margin)
         y = height - margin - (min(val, max_val) / max_val) * (height - 2*margin)
         points.append(f"{x:.0f},{y:.0f}")
     
     polyline = " ".join(points)
-    # 시작값과 끝값 표시
     start_val = value_log[0]
     end_val = value_log[-1]
     
@@ -159,7 +156,7 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
         <span>{max_time:.1f}분 (현재: {end_val:.0f}{unit})</span>
     </div>'''
 
-# ── 측정 시간 입력 페이지 (시작 화면) ──
+# ── 측정 시간 입력 페이지 ──
 def make_setup_page():
     return """<!DOCTYPE html>
 <html>
@@ -202,16 +199,15 @@ def make_setup_page():
 </body>
 </html>"""
 
-# ── 측정 진행 화면 ──
+# ── 측정 진행 및 대시보드 화면 ──
 def make_measure_page():
     uptime = utime.ticks_ms() // 1000
     resp = data["respiration"]
     
-    # 경과 시간 및 남은 시간 계산
     if is_measuring:
         elapsed = utime.ticks_diff(utime.ticks_ms(), start_time) // 1000
         elapsed_min = elapsed / 60
-        remain_min = total_minutes - elapsed_min
+        remain_min = max(0.0, total_minutes - elapsed_min)
         progress = min(100, (elapsed / (total_minutes * 60)) * 100)
         time_info = f"⏱️ {elapsed_min:.1f}분 경과 / 총 {total_minutes}분 (남은 시간: {remain_min:.1f}분)"
         measuring_badge = "🟢 측정 중"
@@ -220,14 +216,13 @@ def make_measure_page():
         time_info = f"✅ {total_minutes}분 측정 완료!"
         measuring_badge = "⏹️ 측정 종료"
     
-    # 상태별 배경색
     if resp == "ANAEROBIC":
-        verdict = "🚨 무기호흡 감지! (부패)"
+        verdict = "🚨 무기호흡 감지! (부패 진행)"
         bg_gradient = "linear-gradient(135deg, #ffe5e5, #ffcccc)"
         verdict_bg = "#ff5252"
         accent = "#d32f2f"
     elif resp == "AEROBIC":
-        verdict = "♻️ 유기호흡 진행 중 (정상)"
+        verdict = "♻️ 유기호흡 진행 중 (정상 퇴비화)"
         bg_gradient = "linear-gradient(135deg, #e8f5e9, #c8e6c9)"
         verdict_bg = "#4caf50"
         accent = "#2e7d32"
@@ -327,35 +322,41 @@ while True:
             client.close()
             continue
         
-        # ★ 측정 시작 요청 처리 ★
+        # ★ 측정 시작 요청 처리 (리다이렉트 기법으로 무한 리셋 방지!) ★
         if 'GET /start?min=' in req_str:
             try:
-                # URL에서 측정 시간(분) 추출
                 min_str = req_str.split('min=')[1].split(' ')[0].split('&')[0]
                 total_minutes = int(min_str)
-                
-                # 측정 시간에 따라 저장 간격 자동 계산 (최대 30개 점)
                 save_interval = max(2, (total_minutes * 60) // MAX_POINTS)
                 
-                # 측정 초기화 및 시작
                 data["co2_log"] = []
                 data["ethanol_log"] = []
                 data["time_log"] = []
+                
                 is_measuring = True
+                just_started = True
                 start_time = utime.ticks_ms()
                 last_save_time = utime.ticks_ms()
+                
                 print(f">> ▶ {total_minutes}분 측정 시작! (저장 간격: {save_interval}초)")
-                page = make_measure_page()
+                
+                # 브라우저를 '/measure'로 보내서 무한 리셋 방지!
+                header = "HTTP/1.1 303 See Other\r\n"
+                header += "Location: /measure\r\n"
+                header += "Connection: close\r\n\r\n"
+                client.send(header.encode())
+                client.close()
+                continue
             except Exception as e:
                 print("측정 시작 오류:", e)
                 page = make_setup_page()
-        elif 'GET /' in req_str and 'GET /start' not in req_str:
-            # 홈(설정 화면)으로 가면 측정 중지
-            if req_str.split(' ')[1] == '/':
-                is_measuring = False
-                page = make_setup_page()
-            else:
-                page = make_measure_page()
+                
+        elif 'GET /measure' in req_str:
+            page = make_measure_page()
+            
+        elif 'GET / ' in req_str or 'GET /index' in req_str:
+            is_measuring = False
+            page = make_setup_page()
         else:
             page = make_measure_page()
         
