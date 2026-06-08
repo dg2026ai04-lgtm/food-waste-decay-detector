@@ -3,21 +3,81 @@ import utime
 import network
 import socket
 from scd30 import SCD30
+from neopixel import NeoPixel
 
 # ── 모바일 핫스팟 (2.4GHz) 정보 입력 ──────────────────
 # ★ 아래 두 줄을 본인 핫스팟 정보로 수정하세요! (따옴표는 남겨두기)
-SSID = "senWiFi_Free_sky"      
-PASSWORD = "sudo25sky@"
+SSID = "WiFi_Name"      
+PASSWORD = "WiFi_Password"
 
-# ── 하드웨어 핀 설정 ──────────────────────────────────
-led_green = Pin(16, Pin.OUT)
-led_red = Pin(18, Pin.OUT)
-mq2_sensor = ADC(26)
+# ── WS2813 네오픽셀 LED 설정 (D16 = GP16) ──────────────
+NEOPIXEL_PIN = 16       # WS2813 DIN을 D16에 연결
+NUM_LEDS = 10           # LED 개수
+np = NeoPixel(Pin(NEOPIXEL_PIN), NUM_LEDS)
+LED_BRIGHTNESS = 0.3    # 밝기 (0.0~1.0, 전류 절약을 위해 0.3 권장)
+
+# ── 기타 하드웨어 핀 설정 ──────────────────────────────
+mq2_sensor = ADC(26)    # A0 (에탄올 센서)
 
 i2c = SoftI2C(sda=Pin(8, Pin.PULL_UP), scl=Pin(9, Pin.PULL_UP), freq=20000)
 
 CO2_ACTIVE_LIMIT = 800.0      
 ETHANOL_WARN_LIMIT = 500.0    
+
+# ── WS2813 네오픽셀 제어 함수들 ──────────────────────
+def set_all_leds(r, g, b):
+    """모든 LED를 같은 색으로 (밝기 적용)"""
+    r = int(r * LED_BRIGHTNESS)
+    g = int(g * LED_BRIGHTNESS)
+    b = int(b * LED_BRIGHTNESS)
+    for i in range(NUM_LEDS):
+        np[i] = (r, g, b)
+    np.write()
+
+def wheel(pos):
+    """무지개 색상 계산 (0~255 입력 → RGB 반환)"""
+    if pos < 85:
+        return (255 - pos * 3, pos * 3, 0)
+    elif pos < 170:
+        pos -= 85
+        return (0, 255 - pos * 3, pos * 3)
+    else:
+        pos -= 170
+        return (pos * 3, 0, 255 - pos * 3)
+
+rainbow_pos = 0
+
+def rainbow_cycle():
+    """무지개가 흐르는 효과"""
+    global rainbow_pos
+    for i in range(NUM_LEDS):
+        color = wheel((i * 256 // NUM_LEDS + rainbow_pos) & 255)
+        r = int(color[0] * LED_BRIGHTNESS)
+        g = int(color[1] * LED_BRIGHTNESS)
+        b = int(color[2] * LED_BRIGHTNESS)
+        np[i] = (r, g, b)
+    np.write()
+    rainbow_pos = (rainbow_pos + 8) & 255
+
+def update_leds(respiration, is_connected, blink):
+    """상태에 따라 LED 효과 결정"""
+    if not is_connected:
+        rainbow_cycle()                # 🌈 연결 중: 무지개
+    elif respiration == "ANAEROBIC":
+        if blink:
+            set_all_leds(255, 0, 0)    # 🔴 무기호흡: 빨강 깜빡임
+        else:
+            set_all_leds(0, 0, 0)
+    elif respiration == "AEROBIC":
+        set_all_leds(0, 255, 0)        # 🟢 유기호흡: 초록
+    else:
+        set_all_leds(0, 80, 255)       # 🔵 대기: 파랑
+
+# ── 부팅 시 LED 테스트 (무지개 한 바퀴) ──
+print(">> 🌈 LED 테스트 중...")
+for _ in range(30):
+    rainbow_cycle()
+    utime.sleep_ms(30)
 
 scd_sensor = None
 try:
@@ -30,7 +90,7 @@ try:
 except Exception as e:
     print(">> ❌ 센서 에러:", e)
 
-# ── 와이파이 연결 ──────────────────────────
+# ── 와이파이 연결 (연결 중 무지개 효과!) ──────────────
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
 wlan.connect(SSID, PASSWORD)
@@ -41,11 +101,13 @@ while max_wait > 0:
         break
     max_wait -= 1
     print(".", end="")
+    rainbow_cycle()        # 연결되는 동안 무지개 흐름!
     utime.sleep(1)
 
 if wlan.isconnected():
     my_ip = wlan.ifconfig()[0]
     print(f"\n✅ 연결 성공! 접속 주소: http://{my_ip}")
+    set_all_leds(0, 80, 255)   # 연결 성공하면 파란색 대기
 else:
     my_ip = "127.0.0.1"
     print("\n❌ 와이파이 연결 실패")
@@ -92,18 +154,16 @@ def update_sensor_data():
     has_ethanol = ethanol_ppm > ETHANOL_WARN_LIMIT
     blink_state = not blink_state
     
+    # ★ 호흡 종류 판별 ★
     if is_decomposing and has_ethanol:
         data["respiration"] = "ANAEROBIC"
-        led_green.value(0)
-        led_red.value(1 if blink_state else 0)
     elif is_decomposing and not has_ethanol:
         data["respiration"] = "AEROBIC"
-        led_green.value(1)
-        led_red.value(0)
     else:
         data["respiration"] = "WAITING"
-        led_green.value(1 if blink_state else 0)
-        led_red.value(0)
+    
+    # ★ WS2813 네오픽셀 LED 업데이트 ★
+    update_leds(data["respiration"], wlan.isconnected(), blink_state)
     
     if is_measuring:
         now = utime.ticks_ms()
@@ -120,13 +180,11 @@ def update_sensor_data():
         
         if elapsed_sec >= total_minutes * 60:
             is_measuring = False
-            led_green.value(0)
-            led_red.value(0)
             print(f">> ⏰ {total_minutes}분 측정 완료!")
     
     print(f"CO2:{co2:.0f} 에탄올:{ethanol_ppm:.0f}ppm → {data['respiration']}")
 
-# ── 시간축 SVG 그래프 (자동 확대 + 눈금 + 점 표시) ──
+# ── 시간축 SVG 그래프 (자동 확대 + 눈금 + 점 표시 + 안전장치) ──
 def make_time_graph(value_log, time_log, color, max_val, label, unit):
     if len(value_log) < 2:
         return f'<div style="color:#999; font-size:0.85em; padding:20px; text-align:center;">⏳ 잠시만 기다려 주세요 (두 번째 데이터 수집 후 그래프가 나타납니다)</div>'
@@ -158,8 +216,7 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
     for i, val in enumerate(value_log):
         x = margin_x + (time_log[i] / max_time) * graph_w
         y = margin_top + graph_h - ((val - y_min) / y_range) * graph_h
-        # ★ 안전장치: y좌표가 그래프 박스를 벗어나지 않도록 제한! ★
-        y = max(margin_top, min(y, margin_top + graph_h))
+        y = max(margin_top, min(y, margin_top + graph_h))  # 안전장치
         points.append(f"{x:.1f},{y:.1f}")
         circles += f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="{color}"/>'
     
@@ -204,7 +261,7 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
         <span>⏱️ 0분 (시작: {start_val:.0f}{unit})</span>
         <span>{max_time:.1f}분 (현재: {end_val:.0f}{unit})</span>
     </div>'''
-# ── 측정 시간 입력 페이지 ──
+    # ── 측정 시간 입력 페이지 ──
 def make_setup_page():
     return """<!DOCTYPE html>
 <html>
@@ -269,16 +326,19 @@ def make_measure_page():
         bg_gradient = "linear-gradient(135deg, #ffe5e5, #ffcccc)"
         verdict_bg = "#ff5252"
         accent = "#d32f2f"
+        led_info = "🔴 빨간 LED 깜빡임 (경보!)"
     elif resp == "AEROBIC":
         verdict = "♻️ 유기호흡 진행 중 (정상 퇴비화)"
         bg_gradient = "linear-gradient(135deg, #e8f5e9, #c8e6c9)"
         verdict_bg = "#4caf50"
         accent = "#2e7d32"
+        led_info = "🟢 초록 LED 점등 (정상)"
     else:
         verdict = "💨 분해 대기 상태"
         bg_gradient = "linear-gradient(135deg, #f5f5f5, #e0e0e0)"
         verdict_bg = "#9e9e9e"
         accent = "#616161"
+        led_info = "🔵 파란 LED (대기 중)"
 
     return f"""<!DOCTYPE html>
 <html>
@@ -298,6 +358,7 @@ def make_measure_page():
         .progress-fill {{ background: {verdict_bg}; height: 100%; width: {progress:.0f}%; border-radius: 10px; transition: width 0.5s; }}
         .verdict {{ background: {verdict_bg}; color: white; border-radius: 16px; padding: 18px; text-align: center; max-width: 550px; margin: 12px auto; box-shadow: 0 6px 18px rgba(0,0,0,0.15); }}
         .verdict .title {{ font-size: 1.3em; font-weight: bold; }}
+        .led-badge {{ background: white; border-radius: 12px; padding: 12px; max-width: 550px; margin: 10px auto; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.08); color: {accent}; font-weight: bold; font-size: 0.9em; }}
         .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 550px; margin: 12px auto; }}
         .card {{ background: white; border-radius: 14px; padding: 16px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }}
         .card.ethanol {{ border: 2px solid #ff9800; }}
@@ -323,6 +384,8 @@ def make_measure_page():
     <div class="verdict">
         <div class="title">{verdict}</div>
     </div>
+    
+    <div class="led-badge">💡 현재 LED 상태: {led_info}</div>
     
     <div class="grid">
         <div class="card"><div class="icon">🌫️</div><div class="label">CO₂ 농도</div><div class="value">{data['co2']:.0f} ppm</div></div>
