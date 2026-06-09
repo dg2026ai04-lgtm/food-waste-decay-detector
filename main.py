@@ -233,11 +233,10 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
         label_val = y_max - (y_max - y_min) * ratio
         y_labels += f'<text x="{margin_x + 2}" y="{gy - 2:.1f}" font-size="8" fill="#aaa">{label_val:.0f}</text>'
     
-    # ★ 핵심 수정: 직전 값과 비교해서 지금 오르는지 내리는지 판단! ★
     start_val = value_log[0]
     end_val = value_log[-1]
-    prev_val = value_log[-2]      # 바로 직전 값
-    recent_change = end_val - prev_val   # 직전 대비 변화
+    prev_val = value_log[-2]
+    recent_change = end_val - prev_val
     
     if recent_change > 1:
         change_text = f'<span style="color:#e53935; font-weight:bold;">▲ 상승 중 ({end_val:.0f}{unit})</span>'
@@ -261,7 +260,7 @@ def make_time_graph(value_log, time_log, color, max_val, label, unit):
         <span>⏱️ 0분 (시작: {start_val:.0f}{unit})</span>
         <span>{max_time:.1f}분 (현재: {end_val:.0f}{unit})</span>
     </div>'''
-# ── 측정 시간 입력 페이지 ──
+    # ── 측정 시간 입력 페이지 ──
 def make_setup_page():
     return """<!DOCTYPE html>
 <html>
@@ -323,14 +322,31 @@ def make_measure_page():
         time_info = f"✅ {total_minutes}분 측정 완료!"
         measuring_badge = "⏹️ 측정 종료"
     
-    # ★ 상태별 비주얼 (사진 대신 큰 이모지로 안정적 표시!) ★
+    # ★ 상태별 귀여운 캐릭터 일러스트 (SVG로 직접 그림!) ★
     if resp == "ANAEROBIC":
         verdict = "🚨 무기호흡 감지! (부패 진행)"
         bg_gradient = "linear-gradient(135deg, #ffcccc, #ff9999)"
         verdict_bg = "#ff5252"
         accent = "#d32f2f"
         led_info = "🔴 빨간 LED 깜빡임 (경보!)"
-        top_visual = '<div class="top-emoji rotten-top">🤢🍎🪰💀</div>'
+        top_visual = '''<div class="top-illust rotten-top">
+            <svg viewBox="0 0 120 100" width="90" height="75">
+                <ellipse cx="60" cy="60" rx="35" ry="33" fill="#8d9440"/>
+                <ellipse cx="48" cy="55" rx="8" ry="10" fill="#5d6428" opacity="0.6"/>
+                <ellipse cx="72" cy="68" rx="6" ry="7" fill="#5d6428" opacity="0.6"/>
+                <circle cx="50" cy="52" r="5" fill="white"/>
+                <circle cx="70" cy="52" r="5" fill="white"/>
+                <circle cx="50" cy="54" r="2.5" fill="#333"/>
+                <circle cx="70" cy="54" r="2.5" fill="#333"/>
+                <path d="M50 72 Q60 65 70 72" stroke="#444" stroke-width="2.5" fill="none"/>
+                <path d="M40 45 Q43 42 46 45" stroke="#5d6428" stroke-width="2" fill="none"/>
+                <ellipse cx="42" cy="62" rx="3" ry="4" fill="#7ec8e3" opacity="0.7"/>
+                <path d="M60 28 Q58 20 62 22" stroke="#6b4423" stroke-width="3" fill="none"/>
+                <text x="92" y="35" font-size="14">🪰</text>
+                <text x="18" y="40" font-size="12">💨</text>
+            </svg>
+            <div class="illust-text">부패 중...</div>
+        </div>'''
         scene = """
         <div class="scene rotten">
             <div class="rot-emoji">🍎</div>
@@ -347,7 +363,24 @@ def make_measure_page():
         verdict_bg = "#4caf50"
         accent = "#2e7d32"
         led_info = "🟢 초록 LED 점등 (정상)"
-        top_visual = '<div class="top-emoji fresh-top">🌱🍃♻️✨</div>'
+        top_visual = '''<div class="top-illust fresh-top">
+            <svg viewBox="0 0 120 100" width="90" height="75">
+                <ellipse cx="60" cy="60" rx="35" ry="33" fill="#a5d66f"/>
+                <circle cx="49" cy="55" r="6" fill="white"/>
+                <circle cx="71" cy="55" r="6" fill="white"/>
+                <circle cx="50" cy="56" r="3" fill="#333"/>
+                <circle cx="72" cy="56" r="3" fill="#333"/>
+                <circle cx="51" cy="55" r="1" fill="white"/>
+                <circle cx="73" cy="55" r="1" fill="white"/>
+                <path d="M48 68 Q60 78 72 68" stroke="#333" stroke-width="2.5" fill="none"/>
+                <circle cx="42" cy="64" r="4" fill="#ff9eb0" opacity="0.6"/>
+                <circle cx="78" cy="64" r="4" fill="#ff9eb0" opacity="0.6"/>
+                <path d="M55 28 Q53 18 58 22 Q60 16 62 22 Q67 18 65 28" fill="#4caf50"/>
+                <text x="92" y="35" font-size="14">✨</text>
+                <text x="15" y="40" font-size="14">🌟</text>
+            </svg>
+            <div class="illust-text">건강하게 분해 중!</div>
+        </div>'''
         scene = """
         <div class="scene fresh">
             <div class="pile">🍂🪵🍂</div>
@@ -364,7 +397,18 @@ def make_measure_page():
         verdict_bg = "#9e9e9e"
         accent = "#616161"
         led_info = "🔵 파란 LED (대기 중)"
-        top_visual = '<div class="top-emoji">🍱⏳🔬</div>'
+        top_visual = '''<div class="top-illust">
+            <svg viewBox="0 0 120 100" width="90" height="75">
+                <ellipse cx="60" cy="60" rx="35" ry="33" fill="#bdbdbd"/>
+                <circle cx="49" cy="55" r="5" fill="white"/>
+                <circle cx="71" cy="55" r="5" fill="white"/>
+                <circle cx="50" cy="55" r="2.5" fill="#333"/>
+                <circle cx="72" cy="55" r="2.5" fill="#333"/>
+                <line x1="48" y1="70" x2="72" y2="70" stroke="#333" stroke-width="2.5"/>
+                <text x="90" y="35" font-size="14">💤</text>
+            </svg>
+            <div class="illust-text">측정 대기 중...</div>
+        </div>'''
         scene = """
         <div class="scene waiting">
             <div class="wait-emoji">🍱</div>
@@ -382,10 +426,13 @@ def make_measure_page():
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ font-family: -apple-system, 'Segoe UI', sans-serif; background: {bg_gradient}; color: #333; padding: 20px; min-height: 100vh; transition: background 0.8s ease; }}
         
-        /* 상단 이모지 배너 (사진 대신 안정적!) */
-        .top-emoji {{ width: 100%; max-width: 550px; height: 110px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center; font-size: 3em; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); background: white; gap: 10px; }}
-        .fresh-top {{ background: linear-gradient(135deg, #c8e6c9, #81c784); }}
-        .rotten-top {{ background: linear-gradient(135deg, #a1887f, #6d4c41); animation: rotten-shake 0.6s infinite; }}
+        /* 상단 귀여운 캐릭터 일러스트 */
+        .top-illust {{ width: 100%; max-width: 550px; min-height: 130px; margin: 0 auto 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); background: white; padding: 12px; }}
+        .illust-text {{ font-weight: bold; font-size: 0.95em; margin-top: 4px; color: #555; }}
+        .fresh-top {{ background: linear-gradient(135deg, #e8f5e9, #a5d6a7); }}
+        .fresh-top .illust-text {{ color: #2e7d32; }}
+        .rotten-top {{ background: linear-gradient(135deg, #d7ccc8, #a1887f); animation: rotten-shake 0.6s infinite; }}
+        .rotten-top .illust-text {{ color: #5d4037; }}
         @keyframes rotten-shake {{ 0%,100% {{ transform: rotate(-1deg); }} 50% {{ transform: rotate(1deg); }} }}
         
         .header {{ text-align: center; padding: 5px 0; margin-bottom: 12px; }}
